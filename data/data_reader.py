@@ -1,5 +1,6 @@
 import pandas as pd
 import requests
+import re
 
 def download_file(url, destination):
     response = requests.get(url)
@@ -18,4 +19,12 @@ def hu_data_loader(address='http://humap2.proteincomplexes.org/static/downloads/
 
   data=pd.read_csv(destination_path)
   return data
+
+def query_hu_data(data,name):
+    returned_list=list(data[data['genenames'].apply(lambda x: name in x.split( ))]['genenames'])
+    returned_list=' '.join(returned_list)
+    returned_list=returned_list.replace(name,'')
+    returned_list=re.sub(r'\s+', ' ', returned_list)
+    returned_list=returned_list.split(' ')
+    return returned_list
 
