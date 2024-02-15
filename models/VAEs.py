@@ -14,8 +14,13 @@ class Encoder(nn.Module):
         self.kl_coef=kl_coef
         self.dense1=nn.Linear(shape0,BASENUM)
         self.bn1=nn.BatchNorm1d(BASENUM)
-        self.dense2=nn.Linear(BASENUM,BASENUM//4)
-        self.bn2=nn.BatchNorm1d(BASENUM//4)
+
+        self.dense2=nn.Linear(BASENUM,BASENUM//2)
+        self.bn2=nn.BatchNorm1d(BASENUM//2)
+
+        self.dense3=nn.Linear(BASENUM//2,BASENUM//4)
+        self.bn3=nn.BatchNorm1d(BASENUM//4)
+
         self.mu=nn.Linear(BASENUM//4, latent_dim)
         self.logvar=nn.Linear(BASENUM//4, latent_dim)
         self.kl = 0
@@ -28,6 +33,7 @@ class Encoder(nn.Module):
         bn=x.size(0)
         x=F.relu(self.bn1(self.dense1(x)))
         x=F.relu(self.bn2(self.dense2(x)))
+        x=F.relu(self.bn3(self.dense3(x)))
         mu =  self.mu(x)
         logvar = self.logvar(x)
         z=self.reparameterize(mu , logvar)
@@ -40,13 +46,19 @@ class Decoder(nn.Module):
         super(Decoder, self).__init__()
         self.dense1=nn.Linear(latent_dim,BASENUM//4)
         self.bn1=nn.BatchNorm1d(BASENUM//4)
-        self.dense2=nn.Linear(BASENUM//4,BASENUM)
-        self.bn2=nn.BatchNorm1d(BASENUM)
+
+        self.dense2=nn.Linear(BASENUM//4,BASENUM//2)
+        self.bn2=nn.BatchNorm1d(BASENUM//2)
+
+        self.dense3=nn.Linear(BASENUM//2,BASENUM)
+        self.bn3=nn.BatchNorm1d(BASENUM)
+        
         self.out=nn.Linear(BASENUM,shape0)
 
     def forward(self, z):
         z = F.relu(self.bn1(self.dense1(z)))
         z = F.relu(self.bn2(self.dense2(z)))
+        z = F.relu(self.bn3(self.dense3(z)))
         z = self.out(z)
         return z
 
