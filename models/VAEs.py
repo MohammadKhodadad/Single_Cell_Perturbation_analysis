@@ -21,8 +21,11 @@ class Encoder(nn.Module):
         self.dense3=nn.Linear(BASENUM//2,BASENUM//4)
         self.bn3=nn.BatchNorm1d(BASENUM//4)
 
-        self.mu=nn.Linear(BASENUM//4, latent_dim)
-        self.logvar=nn.Linear(BASENUM//4, latent_dim)
+        self.dense4=nn.Linear(BASENUM//4,BASENUM//8)
+        self.bn4=nn.BatchNorm1d(BASENUM//8)
+
+        self.mu=nn.Linear(BASENUM//8, latent_dim)
+        self.logvar=nn.Linear(BASENUM//8, latent_dim)
         self.kl = 0
     def reparameterize(self, mu , logvar):
         std = torch.exp(logvar*0.5)
@@ -34,6 +37,7 @@ class Encoder(nn.Module):
         x=F.relu(self.bn1(self.dense1(x)))
         x=F.relu(self.bn2(self.dense2(x)))
         x=F.relu(self.bn3(self.dense3(x)))
+        x=F.relu(self.bn4(self.dense4(x)))
         mu =  self.mu(x)
         logvar = self.logvar(x)
         z=self.reparameterize(mu , logvar)
@@ -44,14 +48,17 @@ class Encoder(nn.Module):
 class Decoder(nn.Module):
     def __init__(self,shape0, latent_dim=8,BASENUM=512,device='cpu'):
         super(Decoder, self).__init__()
-        self.dense1=nn.Linear(latent_dim,BASENUM//4)
-        self.bn1=nn.BatchNorm1d(BASENUM//4)
+        self.dense1=nn.Linear(latent_dim,BASENUM//8)
+        self.bn1=nn.BatchNorm1d(BASENUM//8)
 
-        self.dense2=nn.Linear(BASENUM//4,BASENUM//2)
-        self.bn2=nn.BatchNorm1d(BASENUM//2)
+        self.dense2=nn.Linear(BASENUM//8,BASENUM//4)
+        self.bn2=nn.BatchNorm1d(BASENUM//4)
 
-        self.dense3=nn.Linear(BASENUM//2,BASENUM)
-        self.bn3=nn.BatchNorm1d(BASENUM)
+        self.dense3=nn.Linear(BASENUM//4,BASENUM//2)
+        self.bn3=nn.BatchNorm1d(BASENUM//2)
+
+        self.dense4=nn.Linear(BASENUM//2,BASENUM)
+        self.bn4=nn.BatchNorm1d(BASENUM)
         
         self.out=nn.Linear(BASENUM,shape0)
 
@@ -59,6 +66,7 @@ class Decoder(nn.Module):
         z = F.relu(self.bn1(self.dense1(z)))
         z = F.relu(self.bn2(self.dense2(z)))
         z = F.relu(self.bn3(self.dense3(z)))
+        z = F.relu(self.bn4(self.dense4(z)))
         z = self.out(z)
         return z
 
@@ -74,12 +82,13 @@ class VariationalAutoencoder(nn.Module):
 
 
 
-def train(model,opt,loss_fn,train_loader,test_loader=None,device='cpu',n_epochs=100):
+def train(model,opt,loss_fn,train_loader,test_loader=None,device='cpu',n_epochs=100,save=False):
     model.train()
     for epoch in range(n_epochs):
         train_loss1=0
         train_loss2=0
         model.train()
+        max_loss=1e9
         for batch in tqdm.tqdm(train_loader):
             x = batch['x'].to(device) # GPU
             c = batch['c'].to(device) # GPU
@@ -92,6 +101,10 @@ def train(model,opt,loss_fn,train_loader,test_loader=None,device='cpu',n_epochs=
             train_loss2+=loss2.detach().cpu().numpy()
             loss.backward()
             opt.step()
+            if save:
+                if train_loss1/len(train_loader)+train_loss2/len(train_loader)<max_loss:
+                    max_loss=train_loss1/len(train_loader)+train_loss2/len(train_loader)
+                    torch.save(model.state_dict(), "best_model.pt")
         print(f"TRAIN: EPOCH {epoch}: MSE: {train_loss1/len(train_loader)}, KL_LOSS: {train_loss2/len(train_loader)}")
 
 

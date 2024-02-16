@@ -46,12 +46,12 @@ dataset=X_dataset(adata_orig)
 train_loader=DataLoader(dataset,batch_size=32,shuffle=True)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-autoencoder=VariationalAutoencoder(dataset[0]['x'].shape[0],10,1e-11,512,device)
+autoencoder=VariationalAutoencoder(dataset[0]['x'].shape[0],32,1e-11,2048,device)
 opt = torch.optim.Adam(autoencoder.parameters(),lr=0.001)
 loss_fn=torch.nn.MSELoss()
 
 
-train(autoencoder,opt,loss_fn,train_loader,None,device,500)
+train(autoencoder,opt,loss_fn,train_loader,None,device,250)
 
 df_to_be_shown=encode(autoencoder,dataset,device)
 cos_sim_f=cosine_similarity(np.array(df_to_be_shown.drop(['control'], axis=1)))
@@ -86,7 +86,7 @@ def get_recall(rate):
     fp=np.logical_and(pred_p,similarity_matrix_flatten==0).sum()
     fn=np.logical_and(pred_n,similarity_matrix_flatten==1).sum()
     return tp/(tp+fn)
-def visualize_recal_vs_quantile():
+def visualize_recal_vs_quantile(fig_name='output'):
     values=[]
     xs=[i*0.05 for i in range(10)]
     for i in xs:
@@ -102,10 +102,11 @@ def visualize_recal_vs_quantile():
     )
 )
     # fig.show()
+    fig.write_html(f"{fig_name}.html")
     
 
 
-# visualize_recal_vs_quantile()
+visualize_recal_vs_quantile()
 
 
 choice=np.random.choice(cos_sim_f_flatten1.shape[0], 2048)
