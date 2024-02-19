@@ -1,7 +1,8 @@
 import sys
 sys.path.append('..')
-from data.data_reader import *
 from models.VAEs import *
+from data.data_reader import *
+
 
 
 import os
@@ -17,22 +18,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
-# download_file('https://plus.figshare.com/ndownloader/files/35775512','35775512.h5ad')
-# adata_orig = sc.read_h5ad("35775512.h5ad")
-if not os.path.exists('35773217.h5ad'):
-    download_file('https://plus.figshare.com/ndownloader/files/35773217','35773217.h5ad')
-adata_orig = sc.read_h5ad("35773217.h5ad")
+
+adata_orig = sc.read_h5ad("35775554.h5ad")
 adata_orig.X[adata_orig.X == float("inf")]=0
 adata_orig.X[np.isnan(adata_orig.X)]=0
 
-adata_orig.obs['gene_name']=list(pd.Series(adata_orig.obs.index).apply(lambda x:x.split("_")[1]))
-adata_orig.obs['id']=range(adata_orig.obs.shape[0])
-
-def cosine_similarity(A):
-  AAt=np.matmul(A,A.transpose())
-  n_A=np.sqrt((A**2).sum(axis=1)).reshape(-1,1)
-  n_A=np.matmul(n_A,n_A.transpose())
-  return AAt/(n_A)
 
 class X_dataset(Dataset):
     def __init__(self,data):
@@ -40,33 +30,43 @@ class X_dataset(Dataset):
     def __len__(self):
         return len(self.data)
     def __getitem__(self, idx):
-        return {'x':torch.tensor(self.data.X[idx]),'c':torch.tensor(self.data.obs.iloc[idx]['core_control'])}
+        return {'x':torch.tensor(self.data.X[idx]),'c':torch.tensor(self.data.obs.iloc[idx]['core_scale_factor'])}
 
 
 dataset=X_dataset(adata_orig)
-train_loader=DataLoader(dataset,batch_size=32,shuffle=True)
-
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-autoencoder=VariationalAutoencoder(dataset[0]['x'].shape[0],32,1e-11,2048,device)
-opt = torch.optim.Adam(autoencoder.parameters(),lr=0.001)
-loss_fn=torch.nn.MSELoss()
+autoencoder=VariationalAutoencoder(dataset[0]['x'].shape[0],128,1e-11,4096,device)
+autoencoder.load_state_dict(torch.load('best_model.pt'))
 
 
-train(autoencoder,opt,loss_fn,train_loader,None,device,250)
 
 df_to_be_shown=encode(autoencoder,dataset,device)
-cos_sim_f=cosine_similarity(np.array(df_to_be_shown.drop(['control'], axis=1)))
+df_to_be_shown['gene_name']=list(adata_orig.obs.gene)
+df_to_be_shown=df_to_be_shown.groupby(['gene_name']).mean()
+df_to_be_shown['gene_name']=df_to_be_shown.index
+df_to_be_shown.reset_index(drop=True,inplace=True)
+df_to_be_shown['id']=range(df_to_be_shown.shape[0])
 
+
+def cosine_similarity(A):
+  AAt=np.matmul(A,A.transpose())
+  n_A=np.sqrt((A**2).sum(axis=1)).reshape(-1,1)
+  n_A=np.matmul(n_A,n_A.transpose())
+  output=AAt/(n_A)
+  output[np.isnan(output)]=0
+  return output
+
+cos_sim_f=cosine_similarity(np.array(df_to_be_shown.drop(['control','gene_name','id'], axis=1,errors='ignore')))
 
 similarity_matrix=np.zeros(cos_sim_f.shape)
 similarity_db=hu_data_loader()
 
-for gene_name in tqdm.tqdm(adata_orig.obs.gene_name.unique()):
+for gene_name in tqdm.tqdm(df_to_be_shown.gene_name.unique()):
     query=query_hu_data(similarity_db,gene_name)
     for q in query:
-        if q in adata_orig.obs.gene_name.values:
-            y_indices=adata_orig.obs[adata_orig.obs.gene_name==q].id
-            x_indices=adata_orig.obs[adata_orig.obs.gene_name==gene_name].id
+        if q in df_to_be_shown.gene_name.values:
+            y_indices=df_to_be_shown[df_to_be_shown.gene_name==q].id
+            x_indices=df_to_be_shown[df_to_be_shown.gene_name==gene_name].id
             for x_id in x_indices:
                 for y_id in y_indices:
                     similarity_matrix[y_id,x_id]=1
@@ -128,11 +128,3 @@ fig=px.violin(cos_sim_f_flatten0, y='correlations',width=500, height=400,title="
 print("Not SIMILARS MEAN:",cos_sim_f_flatten0.mean())
 print("SIMILARS MEAN:",cos_sim_f_flatten1.mean())
 
-
-
-# fig=px.scatter(df_to_be_shown,x='f0',y='f1',color='control',width=500, height=400)
-# fig.show()
-# fig=px.scatter(df_to_be_shown,x='f2',y='f3',color='control',width=500, height=400)
-# fig.show()
-# fig=px.scatter(df_to_be_shown,x='f4',y='f5',color='control',width=500, height=400)
-# fig.show()
