@@ -42,12 +42,12 @@ class X_dataset(Dataset):
 
 
 dataset=X_dataset(adata_orig)
-train_loader=DataLoader(dataset,batch_size=32,shuffle=True)
+train_loader=DataLoader(dataset,batch_size=8,shuffle=True)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-autoencoder=VariationalAutoencoder(dataset[0]['x'].shape[0],128,1e-11,4096,device)
+autoencoder=VariationalAutoencoder(dataset[0]['x'].shape[0],128,1e-11,4096,device) # Remove 4 for simple vae
 opt = torch.optim.Adam(autoencoder.parameters(),lr=0.001)
 loss_fn=torch.nn.MSELoss()
 
 
-train(autoencoder,opt,loss_fn,train_loader,None,device,200,True)
+train(autoencoder,opt,loss_fn,train_loader,None,device,300,True)

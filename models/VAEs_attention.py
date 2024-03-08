@@ -6,26 +6,64 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
+class SingleHeadAttention(torch.nn.Module):
+    def __init__(self, qkv_dim,embed_dim):
+        super(SingleHeadAttention, self).__init__()
+        self.qkv_dim=qkv_dim
+        self.embed_dim = embed_dim
+        self.W_q = torch.nn.Linear(qkv_dim, embed_dim, bias=False)
+        self.W_k = torch.nn.Linear(qkv_dim, embed_dim, bias=False)
+        self.W_v = torch.nn.Linear(qkv_dim, embed_dim, bias=False)
+
+    def forward(self, query, key, value, mask=None):
+        Q = self.W_q(query) #Q,KVe
+        K = self.W_k(key)   #KV,KVe
+        V = self.W_v(value) #KV,Ve
+        attention_scores = torch.matmul(Q, K.transpose(-2, -1)) / torch.sqrt(torch.tensor(self.qkv_dim, dtype=torch.float32)) #Q,KV
+        if mask is not None:
+            attention_scores = attention_scores.masked_fill(mask == 0, float('-inf')) #Q,KV
+        attention_weights = F.softmax(attention_scores, dim=-1) #Q,KV
+        attended_values = torch.matmul(attention_weights, V) #Q,Ve
+        return attended_values, attention_weights
+
+
+class MultiHeadAttention(torch.nn.Module):
+    def __init__(self, qkv_size,embed_size, num_heads,output_size):
+        super(MultiHeadAttention, self).__init__()
+        self.qkv_size=qkv_size
+        self.embed_size = embed_size
+        self.num_heads = num_heads
+        self.attention_heads = torch.nn.ModuleList([SingleHeadAttention(qkv_size,embed_size) for _ in range(num_heads)])
+        self.fc_out = torch.nn.Linear(num_heads * embed_size, output_size)
+
+    def forward(self, query, key, value, mask=None):
+        head_outputs = [attention(query, key, value, mask)[0] for attention in self.attention_heads]
+        concatenated_output = torch.cat(head_outputs, dim=-1)
+        output = self.fc_out(concatenated_output)
+        return output
+
+
 class Encoder(nn.Module):
-    def __init__(self,shape0, latent_dim=10,kl_coef=0.000001,BASENUM=512,device='cpu'):
+    def __init__(self,shape0, latent_dim=10,kl_coef=0.000001,BASENUM=256,embed_size=8,device='cpu'):
         super(Encoder, self).__init__()
         self.latent_dim=latent_dim
         self.device=device
         self.kl_coef=kl_coef
-        self.dense1=nn.Linear(shape0,BASENUM)
-        self.bn1=nn.BatchNorm1d(BASENUM)
+        self.trans_enc=MultiHeadAttention(1,embed_size, 1, embed_size)
+        self.dense1=nn.Linear(shape0*embed_size,BASENUM*embed_size)
+        self.bn1=nn.BatchNorm1d(BASENUM*embed_size)
 
-        self.dense2=nn.Linear(BASENUM,BASENUM//2)
-        self.bn2=nn.BatchNorm1d(BASENUM//2)
+        self.dense2=nn.Linear(BASENUM*embed_size,BASENUM//2*embed_size)
+        self.bn2=nn.BatchNorm1d(BASENUM//2*embed_size)
 
-        self.dense3=nn.Linear(BASENUM//2,BASENUM//4)
-        self.bn3=nn.BatchNorm1d(BASENUM//4)
+        self.dense3=nn.Linear(BASENUM//2*embed_size,BASENUM//4*embed_size)
+        self.bn3=nn.BatchNorm1d(BASENUM//4*embed_size)
 
-        self.dense4=nn.Linear(BASENUM//4,BASENUM//8)
-        self.bn4=nn.BatchNorm1d(BASENUM//8)
+        self.dense4=nn.Linear(BASENUM//4*embed_size,BASENUM//8*embed_size)
+        self.bn4=nn.BatchNorm1d(BASENUM//8*embed_size)
 
-        self.mu=nn.Linear(BASENUM//8, latent_dim)
-        self.logvar=nn.Linear(BASENUM//8, latent_dim)
+        self.mu=nn.Linear(BASENUM//8*embed_size, latent_dim)
+        self.logvar=nn.Linear(BASENUM//8*embed_size, latent_dim)
         self.kl = 0
     def reparameterize(self, mu , logvar):
         std = torch.exp(logvar*0.5)
@@ -34,6 +72,10 @@ class Encoder(nn.Module):
         return z
     def forward(self, x):
         bn=x.size(0)
+        x=x.view(bn,-1,1)
+        x=self.trans_enc(x,x,x)
+        x=x.view(bn,-1)
+        print(x.size())
         x=F.relu(self.bn1(self.dense1(x)))
         x=F.relu(self.bn2(self.dense2(x)))
         x=F.relu(self.bn3(self.dense3(x)))
@@ -71,10 +113,10 @@ class Decoder(nn.Module):
         return z
 
 class VariationalAutoencoder(nn.Module):
-    def __init__(self,shape0, latent_dims=10,kl_coef=0.000001,BASENUM=512,device='cpu'):
+    def __init__(self,shape0, latent_dims=10,kl_coef=0.000001,BASENUM=256,embed_size=4,device='cpu'):
         super(VariationalAutoencoder, self).__init__()
-        self.encoder = Encoder(shape0,latent_dims,kl_coef,BASENUM,device).to(device)
-        self.decoder = Decoder(shape0,latent_dims,BASENUM,device).to(device)
+        self.encoder = Encoder(shape0,latent_dims,kl_coef,BASENUM,embed_size,device).to(device)
+        self.decoder = Decoder(shape0,latent_dims,BASENUM*embed_size,device).to(device)
 
     def forward(self, x):
         z = self.encoder(x)
@@ -101,10 +143,10 @@ def train(model,opt,loss_fn,train_loader,test_loader=None,device='cpu',n_epochs=
             train_loss2+=loss2.detach().cpu().numpy()
             loss.backward()
             opt.step()
-        if save:
-            if train_loss1/len(train_loader)+train_loss2/len(train_loader)<max_loss:
-                max_loss=train_loss1/len(train_loader)+train_loss2/len(train_loader)
-                torch.save(model.state_dict(), "best_model.pt")
+            if save:
+                if train_loss1/len(train_loader)+train_loss2/len(train_loader)<max_loss:
+                    max_loss=train_loss1/len(train_loader)+train_loss2/len(train_loader)
+                    torch.save(model.state_dict(), "best_model.pt")
         print(f"TRAIN: EPOCH {epoch}: MSE: {train_loss1/len(train_loader)}, KL_LOSS: {train_loss2/len(train_loader)}")
 
 
